@@ -1,0 +1,6 @@
+{
+  "name": "Group Expense Splitter",
+  "description": "A minimalist, mobile-first web app for friends to track trip expenses, record transactions, automatically balance debts, and generate easy settlement summaries.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

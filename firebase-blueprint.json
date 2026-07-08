@@ -1,0 +1,61 @@
+{
+  "entities": {
+    "group": {
+      "title": "Trip Share Group",
+      "description": "A trip share group containing members and expense data.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The unique ID of the group"
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the trip/group"
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional description"
+        },
+        "friends": {
+          "type": "array",
+          "description": "List of friends/members in this group"
+        },
+        "expenses": {
+          "type": "array",
+          "description": "List of recorded expenses/settlements"
+        },
+        "currency": {
+          "type": "string",
+          "description": "Local base currency symbol (e.g. $, S$, RM, CN¥)"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp of when the group was created"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "UID of the owner who created this group"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of last update"
+        },
+        "syncCode": {
+          "type": "string",
+          "description": "Optional 6-character short code to share this trip across devices"
+        }
+      },
+      "required": ["id", "name", "friends", "expenses", "currency", "createdAt", "ownerId"]
+    }
+  },
+  "firestore": {
+    "groups/{groupId}": {
+      "schema": "group",
+      "description": "Trip sharing groups synchronized to the cloud"
+    },
+    "syncCodes/{code}": {
+      "description": "Short code lookup to mapping groupId to bypass collection listing restrictions"
+    }
+  }
+}

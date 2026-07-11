@@ -109,6 +109,11 @@ export default function SpendingChart({ expenses, currencySymbol }: SpendingChar
   // Get total max for y-axis scaling logic
   const maxTotal = Math.max(...chartData.map(d => d["Total spent"]));
 
+  // Reserve enough left-hand space for the widest tick label so large-magnitude
+  // currencies (e.g. KRW/IDR in the millions) don't get clipped off the edge
+  const longestTickLabel = `${currencySymbol}${maxTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  const yAxisWidth = Math.max(45, longestTickLabel.length * 7 + 8);
+
   return (
     <div className="bg-white border border-slate-150 rounded-2xl p-4.5 shadow-3xs select-none">
       {/* Header with quick collapsible trigger */}
@@ -144,7 +149,7 @@ export default function SpendingChart({ expenses, currencySymbol }: SpendingChar
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart
                 data={chartData}
-                margin={{ top: 10, right: 10, left: -25, bottom: 0 }}
+                margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
               >
                 <defs>
                   <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
@@ -165,6 +170,7 @@ export default function SpendingChart({ expenses, currencySymbol }: SpendingChar
                   axisLine={false}
                   stroke="#94a6a6"
                   fontWeight={600}
+                  width={yAxisWidth}
                   tickFormatter={(val) => `${currencySymbol}${val.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
                 />
                 <Tooltip

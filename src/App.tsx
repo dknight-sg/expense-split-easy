@@ -17,7 +17,7 @@ import {
   CURRENCIES, calculateGroupTotal,
   calculateBalances, calculateSettlements, generateShareableSummary,
   formatCurrency, CATEGORIES, generateSyncCode, getDefaultExchangeRate,
-  getConvertedExpenses
+  getConvertedExpenses, fetchExchangeRate
 } from './utils';
 import ExpenseForm, { getCategoryIcon } from './components/ExpenseForm';
 import SpendingChart from './components/SpendingChart';
@@ -96,6 +96,7 @@ export default function App() {
 
   // Firebase Real-time Synchronization States
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isFetchingSgdRate, setIsFetchingSgdRate] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [joinedGroupIds, setJoinedGroupIds] = useState<string[]>(() => {
@@ -514,9 +515,25 @@ export default function App() {
   const currentGroup = groups.find(g => g.id === activeGroupId) || null;
   const groupCurrencyCode = currentGroup ? (CURRENCIES.find(c => c.symbol === currentGroup.currency)?.code || currentGroup.currency) : '';
   const sgdExchangeRate = currentGroup ? (currentGroup.sgdExchangeRate || getDefaultExchangeRate(currentGroup.currency)) : 1.34;
-  const displayExpenses = currentGroup 
+  const displayExpenses = currentGroup
     ? getConvertedExpenses(currentGroup.expenses, viewInSgd ? sgdExchangeRate : 1.0)
     : [];
+
+  // Auto-fetch a live SGD exchange rate the first time a trip is opened, instead of
+  // relying on the rough hardcoded approximation table (which can be quite stale/wrong)
+  useEffect(() => {
+    if (!currentGroup || currentGroup.sgdExchangeRate || groupCurrencyCode === 'SGD') return;
+    let cancelled = false;
+    setIsFetchingSgdRate(true);
+    fetchExchangeRate(groupCurrencyCode, 'SGD').then(liveRate => {
+      if (!cancelled && liveRate) {
+        saveGroupLocallyAndSync({ ...currentGroup, sgdExchangeRate: liveRate });
+      }
+    }).finally(() => {
+      if (!cancelled) setIsFetchingSgdRate(false);
+    });
+    return () => { cancelled = true; };
+  }, [currentGroup?.id, currentGroup?.sgdExchangeRate, groupCurrencyCode]);
 
   // Add a friend to the newly forming group
   const handleAddFriendToNewGroup = () => {
@@ -1153,6 +1170,7 @@ export default function App() {
                     <div className="bg-indigo-50/40 px-5 py-2.5 border-b border-indigo-100 flex flex-wrap items-center justify-between gap-3 text-xs shrink-0 select-none">
                       <div className="flex flex-wrap items-center gap-1.5 text-slate-600">
                         <span className="font-semibold text-slate-500">Exchange Rate:</span>
+                        {isFetchingSgdRate && <RefreshCw className="w-3 h-3 text-indigo-400 animate-spin" />}
                         <div className="flex items-center space-x-1 bg-white border border-slate-200 focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100 rounded-lg px-2 py-0.5">
                           <span className="font-bold text-slate-500">1 {currentGroup.currency} =</span>
                           <input

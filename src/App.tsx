@@ -1207,7 +1207,7 @@ export default function App() {
                               : 'text-slate-500 hover:text-slate-800'
                           }`}
                         >
-                          {groupCurrencyCode} Base ({currentGroup.currency})
+                          {groupCurrencyCode} ({currentGroup.currency})
                         </button>
                         <button
                           type="button"

@@ -403,7 +403,7 @@ export default function ExpenseForm({
                 onChange={(e) => handleSetForeignCurrency(e.target.value || null)}
                 className="h-7 pl-2 pr-6 rounded-lg border border-slate-200 bg-white text-[11px] font-bold text-slate-600 focus:outline-none focus:border-indigo-400 cursor-pointer"
               >
-                <option value="">{baseCurrencyCode} Base ({currencySymbol})</option>
+                <option value="">{baseCurrencyCode} ({currencySymbol})</option>
                 {CURRENCIES.filter(c => c.code !== baseCurrencyCode).map(c => (
                   <option key={c.code} value={c.code}>Paid in {c.code} ({c.symbol})</option>
                 ))}

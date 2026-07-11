@@ -6,7 +6,7 @@
 import React, { useState, useRef } from 'react';
 import {
   X, Check, Calendar, DollarSign, Users, AlertCircle, Trash2,
-  Utensils, Car, Home, Coffee, Compass, ShoppingBag, CreditCard, Sparkles,
+  Utensils, Car, Home, Coffee, Compass, ShoppingBag, CreditCard,
   Camera, Loader2
 } from 'lucide-react';
 import { Expense, Friend, SplitType } from '../types';

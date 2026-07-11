@@ -6,7 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Plus, ArrowLeft, Users, Calendar, Trash2, Share2, Copy, 
-  Check, Search, Sparkles, Receipt, Coins, TrendingUp, UserPlus, 
+  Check, Search, Receipt, Coins, TrendingUp, UserPlus,
   ArrowRight, CornerDownRight, RotateCcw, CheckCircle, Landmark,
   Wallet, HelpCircle, X, ChevronRight, MessageSquare, ListFilter,
   DollarSign, AlertTriangle, RefreshCw
@@ -910,7 +910,7 @@ export default function App() {
             exit={{ opacity: 0, scale: 0.92 }}
             className="fixed top-5 left-1/2 -translate-x-1/2 z-[999] bg-slate-900 text-white font-medium text-xs py-2.5 px-4.5 rounded-xl shadow-lg flex items-center space-x-2 border border-slate-800"
           >
-            <Sparkles className="w-4 h-4 text-indigo-400" />
+            <CheckCircle className="w-4 h-4 text-indigo-400 shrink-0" />
             <span>{toastMessage}</span>
           </motion.div>
         )}
@@ -1238,14 +1238,13 @@ export default function App() {
                         <button
                           type="button"
                           onClick={() => setViewInSgd(true)}
-                          className={`px-3 py-1 rounded-lg text-xs font-bold transition-all flex items-center space-x-1 ${
+                          className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
                             viewInSgd
                               ? 'bg-indigo-600 text-white shadow-2xs'
                               : 'text-slate-500 hover:text-slate-800'
                           }`}
                         >
-                          <span>Convert to SGD S$</span>
-                          <Sparkles className="w-3 h-3 text-amber-300 fill-amber-300" />
+                          Convert to SGD S$
                         </button>
                       </div>
                     </div>
@@ -1427,9 +1426,8 @@ export default function App() {
                                           {expense.title}
                                         </h4>
                                         {originalExpense.originalCurrency && (
-                                          <span className="shrink-0 bg-amber-50 text-amber-700 border border-amber-200/50 text-[8px] font-extrabold px-1.5 py-0.5 rounded-full flex items-center gap-0.5" title={`Recorded in ${originalExpense.originalCurrency}`}>
-                                            <span>{originalExpense.originalCurrency}</span>
-                                            <Sparkles className="w-2 h-2 text-amber-500 fill-amber-500" />
+                                          <span className="shrink-0 bg-amber-50 text-amber-700 border border-amber-200/50 text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" title={`Recorded in ${originalExpense.originalCurrency}`}>
+                                            {originalExpense.originalCurrency}
                                           </span>
                                         )}
                                       </div>

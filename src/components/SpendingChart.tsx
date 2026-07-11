@@ -13,7 +13,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import { TrendingUp, Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
+import { TrendingUp, ChevronDown, ChevronUp } from 'lucide-react';
 import { Expense } from '../types';
 
 interface SpendingChartProps {
@@ -121,9 +121,8 @@ export default function SpendingChart({ expenses, currencySymbol }: SpendingChar
             <TrendingUp className="w-4 h-4" />
           </div>
           <div>
-            <h4 className="text-xs font-black text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
-              <span>Spending over time</span>
-              <Sparkles className="w-3 h-3 text-indigo-500 fill-indigo-150" />
+            <h4 className="text-xs font-black text-slate-800 uppercase tracking-wide">
+              Spending over time
             </h4>
             {!isCollapsed && (
               <p className="text-[10px] text-slate-400 font-medium">
@@ -149,37 +148,37 @@ export default function SpendingChart({ expenses, currencySymbol }: SpendingChar
               >
                 <defs>
                   <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.15}/>
-                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0.005}/>
+                    <stop offset="5%" stopColor="#1d5c6b" stopOpacity={0.15}/>
+                    <stop offset="95%" stopColor="#1d5c6b" stopOpacity={0.005}/>
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis 
-                  dataKey="date" 
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e9eeee" />
+                <XAxis
+                  dataKey="date"
                   tickLine={false}
                   axisLine={false}
-                  stroke="#94a3b8"
+                  stroke="#94a6a6"
                   fontWeight={600}
                 />
-                <YAxis 
+                <YAxis
                   tickLine={false}
                   axisLine={false}
-                  stroke="#94a3b8"
+                  stroke="#94a6a6"
                   fontWeight={600}
                   tickFormatter={(val) => `${currencySymbol}${val.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
                 />
-                <Tooltip 
-                  content={<CustomTooltip currencySymbol={currencySymbol} />} 
-                  cursor={{ stroke: '#cbd5e1', strokeWidth: 1, strokeDasharray: '4 4' }}
+                <Tooltip
+                  content={<CustomTooltip currencySymbol={currencySymbol} />}
+                  cursor={{ stroke: '#bac8c8', strokeWidth: 1, strokeDasharray: '4 4' }}
                 />
                 <Area 
                   type="monotone" 
                   dataKey="Total spent" 
-                  stroke="#6366f1" 
+                  stroke="#1d5c6b" 
                   strokeWidth={2.5}
                   fillOpacity={1} 
                   fill="url(#colorTotal)" 
-                  activeDot={{ r: 5, strokeWidth: 0, fill: '#6366f1' }}
+                  activeDot={{ r: 5, strokeWidth: 0, fill: '#1d5c6b' }}
                 />
               </AreaChart>
             </ResponsiveContainer>

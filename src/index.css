@@ -5,13 +5,43 @@
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Space Grotesk", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* "Passport ink" — replaces Tailwind's stock indigo as the brand/accent scale.
+     A deep teal-blue in the spirit of passport-stamp ink and vintage travel-poster
+     printing, instead of the generic SaaS indigo-purple every AI-scaffolded app reaches for. */
+  --color-indigo-50: #eef6f7;
+  --color-indigo-100: #dcedef;
+  --color-indigo-200: #b9dbe0;
+  --color-indigo-300: #8ac0c9;
+  --color-indigo-400: #57a0ac;
+  --color-indigo-500: #357f8d;
+  --color-indigo-600: #1d5c6b;
+  --color-indigo-700: #174955;
+  --color-indigo-800: #123740;
+  --color-indigo-900: #0d262c;
+  --color-indigo-950: #081a1e;
+
+  /* "Ledger paper" — replaces Tailwind's stock slate as the neutral scale.
+     A cool teal-grey (hue-biased toward the ink accent above) rather than a
+     generic uncustomized grey, so the two scales read as one considered palette. */
+  --color-slate-50: #f4f7f7;
+  --color-slate-100: #e9eeee;
+  --color-slate-200: #d7e0e0;
+  --color-slate-300: #bac8c8;
+  --color-slate-400: #94a6a6;
+  --color-slate-500: #718484;
+  --color-slate-600: #57696a;
+  --color-slate-700: #435253;
+  --color-slate-800: #303b3c;
+  --color-slate-900: #1b2223;
+  --color-slate-950: #101414;
 }
 
 @layer base {
   body {
     font-family: var(--font-sans);
-    background-color: #f8fafc;
-    color: #0f172a;
+    background-color: var(--color-slate-50);
+    color: var(--color-slate-900);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -28,11 +58,11 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: var(--color-slate-300);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: var(--color-slate-400);
 }
 

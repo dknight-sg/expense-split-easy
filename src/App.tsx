@@ -7,14 +7,14 @@ import React, { useState, useEffect } from 'react';
 import { 
   Plus, ArrowLeft, Users, Calendar, Trash2, Share2, Copy, 
   Check, Search, Receipt, Coins, TrendingUp, UserPlus,
-  ArrowRight, CornerDownRight, RotateCcw, CheckCircle, Landmark,
+  ArrowRight, CornerDownRight, CheckCircle, Landmark,
   Wallet, HelpCircle, X, ChevronRight, MessageSquare, ListFilter,
   DollarSign, AlertTriangle, RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Group, Friend, Expense, SplitType } from './types';
-import { 
-  getDemoGroup, CURRENCIES, calculateGroupTotal, 
+import {
+  CURRENCIES, calculateGroupTotal,
   calculateBalances, calculateSettlements, generateShareableSummary,
   formatCurrency, CATEGORIES, generateSyncCode, getDefaultExchangeRate,
   getConvertedExpenses
@@ -44,13 +44,7 @@ export default function App() {
         console.error('Failed to parse saved groups', e);
       }
     }
-    // If they have explicitly dismissed or cleared the demo group, do not restore it automatically
-    const isDismissed = localStorage.getItem('splitwise_demo_dismissed') === 'true';
-    if (isDismissed) {
-      return [];
-    }
-    // Preload beautiful demo group if first run
-    return [getDemoGroup()];
+    return [];
   });
 
   const [activeGroupId, setActiveGroupId] = useState<string | null>(() => {
@@ -344,9 +338,6 @@ export default function App() {
   // Firestore publisher loop: Upload local modifications to cloud in real-time
   useEffect(() => {
     groups.forEach(async (group) => {
-      // Don't auto-sync default demo group unless it has been customized or loaded
-      if (group.id === 'demo-group-id' && !group.syncCode) return;
-
       const groupRef = doc(db, 'groups', group.id);
       const groupToSave = {
         ...group,
@@ -385,8 +376,6 @@ export default function App() {
 
     // Subscribe to each local group in real-time
     groups.forEach((group) => {
-      if (group.id === 'demo-group-id' && !group.syncCode) return;
-
       const unsub = onSnapshot(doc(db, 'groups', group.id), (docSnap) => {
         if (!docSnap.exists()) {
           // Group has been deleted on Firestore (hard delete) by owner!
@@ -740,9 +729,6 @@ export default function App() {
     // Find Group info first before removing from state
     const targetGroup = groups.find(g => g.id === groupId);
 
-    // If deleting the demo group or if this is any group deletion, we explicitly state that we don't want the demo restored automatically on refresh
-    localStorage.setItem('splitwise_demo_dismissed', 'true');
-
     // Filter local groups first
     const remaining = groups.filter(g => g.id !== groupId);
 
@@ -860,22 +846,6 @@ export default function App() {
     showToast(`Recorded settlement of ${currentGroup.currency}${transfer.amount}!`);
   };
 
-  // Load standard Demo group fresh
-  const handleRestoreDemo = () => {
-    // Make sure we clear the dismissed flag if they explicitly click Load Demo
-    localStorage.removeItem('splitwise_demo_dismissed');
-    const demo = getDemoGroup();
-    // Check if already exists, else insert
-    if (groups.some(g => g.id === demo.id)) {
-      // Overwrite current
-      setGroups(groups.map(g => g.id === demo.id ? demo : g));
-    } else {
-      setGroups([demo, ...groups]);
-    }
-    setActiveGroupId(demo.id);
-    showToast('Restored Bangkok Demo trip!');
-  };
-
   // Completely wipe local storage and cache context for clean reset on mobile/desktop
   const handleHardReset = () => {
     if (window.confirm("Perform hard reset? This will wipe all locally stored trips and offline cached data on this device. Your synced cloud trips will remain active in the cloud, but you must reopen their invite link to load them.")) {
@@ -938,14 +908,6 @@ export default function App() {
               <span className="hidden sm:inline">New Trip</span>
             </button>
           )}
-
-          <button
-            onClick={handleRestoreDemo}
-            title="Reload Demo Trip Data"
-            className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
-          >
-            <RotateCcw className="w-4 h-4" />
-          </button>
         </div>
       </header>
 
@@ -961,7 +923,7 @@ export default function App() {
             </div>
             <h2 className="text-xl font-bold text-slate-800 font-display">No Trips Active</h2>
             <p className="text-sm text-slate-500 mt-2 max-w-xs mx-auto">
-              Create a quick trip or load our beautiful mock trip to see how simple balancing expenses can be.
+              Create a trip to start splitting expenses with friends.
             </p>
             <div className="mt-6 space-y-3 w-full max-w-xs">
               <button
@@ -969,12 +931,6 @@ export default function App() {
                 className="w-full h-11 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl text-xs tracking-wider transition-all shadow-sm cursor-pointer"
               >
                 Create New Trip
-              </button>
-              <button
-                onClick={handleRestoreDemo}
-                className="w-full h-11 border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 font-semibold rounded-xl text-xs transition-all cursor-pointer"
-              >
-                Load Demo Trip
               </button>
             </div>
           </div>

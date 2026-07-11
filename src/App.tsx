@@ -841,17 +841,22 @@ export default function App() {
       isSettlement: true
     };
 
+    let nextGroup: Group | null = null;
     const updatedGroups = groups.map(g => {
       if (g.id === currentGroup.id) {
-        return {
+        nextGroup = {
           ...g,
-          expenses: [settlementExpense, ...g.expenses]
+          expenses: [settlementExpense, ...g.expenses],
+          updatedAt: new Date().toISOString()
         };
+        return nextGroup;
       }
       return g;
     });
 
-    setGroups(updatedGroups);
+    if (nextGroup) {
+      saveGroupLocallyAndSync(nextGroup, updatedGroups);
+    }
     showToast(`Recorded settlement of ${currentGroup.currency}${transfer.amount}!`);
   };
 
@@ -1365,10 +1370,23 @@ export default function App() {
                           {filteredExpenses.length === 0 ? (
                             <div className="py-16 text-center">
                               <div className="p-3 bg-slate-50 rounded-full inline-block text-slate-400 mb-2 border border-slate-100">
-                                <Search className="w-5 h-5" />
+                                {currentGroup.expenses.length === 0 ? (
+                                  <Receipt className="w-5 h-5" />
+                                ) : (
+                                  <Search className="w-5 h-5" />
+                                )}
                               </div>
-                              <p className="text-xs font-semibold text-slate-450 uppercase tracking-wider">No matching bills found.</p>
-                              <p className="text-[11px] text-slate-400 mt-0.5">Try modifying your query or filter keywords.</p>
+                              {currentGroup.expenses.length === 0 ? (
+                                <>
+                                  <p className="text-xs font-semibold text-slate-450 uppercase tracking-wider">No bills recorded yet.</p>
+                                  <p className="text-[11px] text-slate-400 mt-0.5">Tap "Record spending" to add your first expense.</p>
+                                </>
+                              ) : (
+                                <>
+                                  <p className="text-xs font-semibold text-slate-450 uppercase tracking-wider">No matching bills found.</p>
+                                  <p className="text-[11px] text-slate-400 mt-0.5">Try modifying your query or filter keywords.</p>
+                                </>
+                              )}
                             </div>
                           ) : (
                             filteredExpenses.map(expense => {

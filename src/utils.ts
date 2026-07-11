@@ -107,7 +107,8 @@ export function getConvertedExpenses(expenses: Expense[], multiplier: number): E
 export function formatCurrency(amount: number, currencySymbol: string): string {
   // Avoid negative sign issues for very small floating point numbers
   const cleanAmount = Math.abs(amount) < 0.005 ? 0 : amount;
-  return `${currencySymbol}${cleanAmount.toLocaleString(undefined, {
+  const sign = cleanAmount < 0 ? '-' : '';
+  return `${sign}${currencySymbol}${Math.abs(cleanAmount).toLocaleString(undefined, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;

@@ -14,6 +14,14 @@ export const CURRENCIES = [
   { code: 'KRW', symbol: '₩' },
   { code: 'JPY', symbol: '¥' },
   { code: 'AUD', symbol: 'A$' },
+  { code: 'THB', symbol: '฿' },
+  { code: 'EUR', symbol: '€' },
+  { code: 'GBP', symbol: '£' },
+  { code: 'HKD', symbol: 'HK$' },
+  { code: 'PHP', symbol: '₱' },
+  { code: 'INR', symbol: '₹' },
+  { code: 'IDR', symbol: 'Rp' },
+  { code: 'VND', symbol: '₫' },
 ];
 
 // Predefined categories with custom colors and icons
@@ -40,6 +48,29 @@ export function getDefaultExchangeRate(symbol: string): number {
     case '¥': return 0.0089; // Approximate JPY to SGD
     case 'A$': return 0.89; // Approximate AUD to SGD
     default: return 1.00;
+  }
+}
+
+/**
+ * Fetch a live exchange rate between two ISO currency codes for a given date,
+ * expressed as "1 fromCode = X toCode" (e.g. fromCode='SGD', toCode='THB').
+ * Uses the free, no-API-key Frankfurter API (European Central Bank reference rates).
+ * Returns null if the lookup fails (unsupported currency, offline, etc.) so callers
+ * can fall back to manual entry.
+ */
+export async function fetchExchangeRate(fromCode: string, toCode: string, dateStr?: string): Promise<number | null> {
+  if (fromCode === toCode) return 1;
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const datePath = dateStr && dateStr <= today ? dateStr : 'latest';
+    const res = await fetch(`https://api.frankfurter.dev/v1/${datePath}?base=${fromCode}&symbols=${toCode}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const rate = data?.rates?.[toCode];
+    return typeof rate === 'number' ? rate : null;
+  } catch (err) {
+    console.error('Failed to fetch exchange rate:', err);
+    return null;
   }
 }
 

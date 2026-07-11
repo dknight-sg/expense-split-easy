@@ -8,10 +8,6 @@ service cloud.firestore {
     }
 
     // Main collection helper rules
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
     function isValidId(id) {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
@@ -46,8 +42,7 @@ service cloud.firestore {
     // Rules for finding groups by short code without listing everything
     match /syncCodes/{code} {
       allow get: if true;
-      allow create, update: if isSignedIn()
-        && isValidId(code)
+      allow create, update: if isValidId(code)
         && request.resource.data.groupId is string;
     }
   }

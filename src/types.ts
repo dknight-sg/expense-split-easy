@@ -21,9 +21,9 @@ export interface Expense {
   date: string; // YYYY-MM-DD
   category: string; // 'Food' | 'Transport' | 'Lodging' | 'Drinks' | 'Entertainment' | 'Shopping' | 'Other'
   isSettlement?: boolean; // True if this is a "Settle Up" transaction rather than a general expense
-  originalCurrency?: 'SGD' | string; // If recorded in SGD, other than the group's default
-  sgdAmount?: number; // The amount in SGD
-  exchangeRateUsed?: number; // The active conversion rate used
+  originalCurrency?: string; // ISO code of the currency actually paid in, if different from the group's currency (e.g. a receipt from an overseas trip)
+  originalAmount?: number; // The amount in originalCurrency
+  exchangeRateUsed?: number; // 1 [group currency] = X [originalCurrency], as used at save time
 }
 
 export interface Group {

@@ -3,13 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
-import { 
-  X, Check, Calendar, DollarSign, Users, AlertCircle, Trash2, 
-  Utensils, Car, Home, Coffee, Compass, ShoppingBag, CreditCard, Sparkles 
+import React, { useState, useRef } from 'react';
+import {
+  X, Check, Calendar, DollarSign, Users, AlertCircle, Trash2,
+  Utensils, Car, Home, Coffee, Compass, ShoppingBag, CreditCard, Sparkles,
+  Camera, Loader2
 } from 'lucide-react';
 import { Expense, Friend, SplitType } from '../types';
-import { CATEGORIES, getDefaultExchangeRate, CURRENCIES } from '../utils';
+import { CATEGORIES, getDefaultExchangeRate, CURRENCIES, fetchExchangeRate } from '../utils';
+import { scanReceipt, fileToBase64, ScannedReceipt } from '../gemini';
 
 // Helper to render dynamic Lucide icons cleanly
 export function getCategoryIcon(iconName: string, className = 'w-5 h-5') {
@@ -45,23 +47,31 @@ export default function ExpenseForm({
   onDelete
 }: ExpenseFormProps) {
   const baseCurrencyCode = CURRENCIES.find(c => c.symbol === currencySymbol)?.code || currencySymbol;
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // New currency selection states
-  const [inputInSgd, setInputInSgd] = useState<boolean>(expenseToEdit?.originalCurrency === 'SGD');
+  // Foreign currency recording state: null means the amount is entered directly in the
+  // group's own currency; a code (e.g. 'THB') means it was paid in a different currency
+  // (typically because it's from an overseas receipt) and needs converting.
+  const [foreignCurrencyCode, setForeignCurrencyCode] = useState<string | null>(
+    expenseToEdit?.originalCurrency || null
+  );
   const [customExchangeRate, setCustomExchangeRate] = useState<string>(
-    expenseToEdit?.exchangeRateUsed 
-      ? expenseToEdit.exchangeRateUsed.toString() 
+    expenseToEdit?.exchangeRateUsed
+      ? expenseToEdit.exchangeRateUsed.toString()
       : sgdExchangeRate.toString()
   );
+  const [isFetchingRate, setIsFetchingRate] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
 
   // If editing, load original state, else set standard defaults
   const [title, setTitle] = useState(expenseToEdit?.title || '');
-  
+
   // Set initial display amount based on original recording currency
   const [amountStr, setAmountStr] = useState(() => {
     if (expenseToEdit) {
-      if (expenseToEdit.originalCurrency === 'SGD' && expenseToEdit.sgdAmount) {
-        return expenseToEdit.sgdAmount.toString();
+      if (expenseToEdit.originalCurrency && expenseToEdit.originalAmount) {
+        return expenseToEdit.originalAmount.toString();
       }
       return expenseToEdit.amount.toString();
     }
@@ -83,8 +93,8 @@ export default function ExpenseForm({
     if (expenseToEdit?.splitDetails) {
       const initial: Record<string, string> = {};
       Object.entries(expenseToEdit.splitDetails).forEach(([id, val]) => {
-        // If originally recorded in SGD, display initial unequal shares in SGD (multiply by exchange rate)
-        if (expenseToEdit.originalCurrency === 'SGD' && expenseToEdit.exchangeRateUsed) {
+        // If originally recorded in a foreign currency, display initial unequal shares in that currency (multiply by exchange rate)
+        if (expenseToEdit.originalCurrency && expenseToEdit.exchangeRateUsed) {
           initial[id] = (val * expenseToEdit.exchangeRateUsed).toFixed(2);
         } else {
           initial[id] = val.toString();
@@ -97,31 +107,37 @@ export default function ExpenseForm({
 
   const parsedAmount = parseFloat(amountStr) || 0;
   const activeRate = parseFloat(customExchangeRate) || sgdExchangeRate || 1.34;
-  const activeAmountInGroupCurrency = inputInSgd ? (parsedAmount / activeRate) : parsedAmount;
+  const activeSymbol = foreignCurrencyCode
+    ? (CURRENCIES.find(c => c.code === foreignCurrencyCode)?.symbol || foreignCurrencyCode)
+    : currencySymbol;
+  const activeAmountInGroupCurrency = foreignCurrencyCode ? (parsedAmount / activeRate) : parsedAmount;
 
-  // Handle dynamic currency recording toggle with on-the-fly conversion so no data is lost
-  const handleToggleInputCurrency = (targetSgd: boolean) => {
-    if (targetSgd === inputInSgd) return;
+  // Handle switching which currency the amount is being typed in, converting on-the-fly so no data is lost
+  const handleSetForeignCurrency = async (code: string | null) => {
+    if (code === foreignCurrencyCode) return;
     const currentVal = parseFloat(amountStr) || 0;
-    
-    if (targetSgd) {
-      const converted = currentVal * activeRate;
+
+    if (code) {
+      // Fetch a live "1 groupCurrency = X foreignCurrency" rate for this date; fall back to the current rate if offline/unsupported
+      setIsFetchingRate(true);
+      const liveRate = await fetchExchangeRate(baseCurrencyCode, code, date);
+      setIsFetchingRate(false);
+      const rate = liveRate ?? activeRate;
+      setCustomExchangeRate(rate.toString());
+
+      const converted = currentVal * rate;
       setAmountStr(converted > 0 ? Number(converted.toFixed(2)).toString() : '');
-      
-      // Also scale split details if they are unequal amounts
       if (splitType === 'unequal') {
         const nextDetails = { ...splitDetails };
         Object.keys(nextDetails).forEach(id => {
           const detailValue = parseFloat(nextDetails[id]) || 0;
-          nextDetails[id] = detailValue > 0 ? Number((detailValue * activeRate).toFixed(2)).toString() : '';
+          nextDetails[id] = detailValue > 0 ? Number((detailValue * rate).toFixed(2)).toString() : '';
         });
         setSplitDetails(nextDetails);
       }
     } else {
       const converted = currentVal / activeRate;
       setAmountStr(converted > 0 ? Number(converted.toFixed(2)).toString() : '');
-      
-      // Scale split details back to group currency
       if (splitType === 'unequal') {
         const nextDetails = { ...splitDetails };
         Object.keys(nextDetails).forEach(id => {
@@ -131,11 +147,53 @@ export default function ExpenseForm({
         setSplitDetails(nextDetails);
       }
     }
-    setInputInSgd(targetSgd);
+    setForeignCurrencyCode(code);
+  };
+
+  // Apply the structured result of a receipt scan directly to the form fields
+  const applyScanResult = async (result: ScannedReceipt) => {
+    if (result.description) setTitle(result.description.slice(0, 60));
+    if (result.date) setDate(result.date);
+    if (result.category && CATEGORIES.some(c => c.id === result.category)) {
+      setCategory(result.category);
+    }
+
+    if (result.currencyCode && result.currencyCode !== baseCurrencyCode) {
+      setForeignCurrencyCode(result.currencyCode);
+      setAmountStr(result.amount.toString());
+      setIsFetchingRate(true);
+      const liveRate = await fetchExchangeRate(baseCurrencyCode, result.currencyCode, result.date);
+      setIsFetchingRate(false);
+      if (liveRate) setCustomExchangeRate(liveRate.toString());
+    } else {
+      setForeignCurrencyCode(null);
+      setAmountStr(result.amount.toString());
+    }
+  };
+
+  const handleScanReceiptClick = () => fileInputRef.current?.click();
+
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    setIsScanning(true);
+    setScanError(null);
+    try {
+      const base64 = await fileToBase64(file);
+      const result = await scanReceipt(base64, file.type);
+      await applyScanResult(result);
+    } catch (err) {
+      console.error('Receipt scan failed:', err);
+      setScanError(err instanceof Error ? err.message : 'Failed to scan receipt. Please enter details manually.');
+    } finally {
+      setIsScanning(false);
+    }
   };
 
   // Auto-fill split values when list or splitting format changes to guide users
-  useEffect(() => {
+  React.useEffect(() => {
     if (!expenseToEdit) {
       // For unequal split, auto-divide equally to prepare fields
       if (splitType === 'unequal' && parsedAmount > 0 && splitAmong.length > 0) {
@@ -201,7 +259,7 @@ export default function ExpenseForm({
         const formattedDiff = Math.abs(diff).toFixed(2);
         return {
           isValid: false,
-          message: `The sum of shares does not match total amount. Diff: ${diff > 0 ? '+' : '-'}${inputInSgd ? 'S$' : currencySymbol}${formattedDiff}`,
+          message: `The sum of shares does not match total amount. Diff: ${diff > 0 ? '+' : '-'}${activeSymbol}${formattedDiff}`,
           diff
         };
       }
@@ -231,24 +289,24 @@ export default function ExpenseForm({
     e.preventDefault();
     if (!isValid) return;
 
-    // Convert total and shares back to group base currency if entered in SGD
-    const finalAmount = inputInSgd 
-      ? Number(activeAmountInGroupCurrency.toFixed(2)) 
+    // Convert total and shares back to group base currency if entered in a foreign currency
+    const finalAmount = foreignCurrencyCode
+      ? Number(activeAmountInGroupCurrency.toFixed(2))
       : parsedAmount;
 
     // Package split details back to record of numbers
     const finalDetails: Record<string, number> = {};
     if (splitType !== 'equal') {
       splitAmong.forEach(id => {
-        const valInSgdOrBase = parseFloat(splitDetails[id]) || 0;
+        const valInForeignOrBase = parseFloat(splitDetails[id]) || 0;
         if (splitType === 'unequal') {
-          // Convert SGD shares back to the base currency
-          finalDetails[id] = inputInSgd 
-            ? Number((valInSgdOrBase / activeRate).toFixed(2)) 
-            : valInSgdOrBase;
+          // Convert foreign-currency shares back to the base currency
+          finalDetails[id] = foreignCurrencyCode
+            ? Number((valInForeignOrBase / activeRate).toFixed(2))
+            : valInForeignOrBase;
         } else {
           // Percentages don't need any currency conversion
-          finalDetails[id] = valInSgdOrBase;
+          finalDetails[id] = valInForeignOrBase;
         }
       });
     }
@@ -264,9 +322,9 @@ export default function ExpenseForm({
       category,
       date,
       isSettlement: expenseToEdit?.isSettlement || false,
-      originalCurrency: inputInSgd ? 'SGD' : undefined,
-      sgdAmount: inputInSgd ? parsedAmount : undefined,
-      exchangeRateUsed: inputInSgd ? activeRate : undefined,
+      originalCurrency: foreignCurrencyCode || undefined,
+      originalAmount: foreignCurrencyCode ? parsedAmount : undefined,
+      exchangeRateUsed: foreignCurrencyCode ? activeRate : undefined,
     });
   };
 
@@ -291,47 +349,71 @@ export default function ExpenseForm({
 
       {/* Form Area */}
       <form onSubmit={handleSave} className="flex-1 overflow-y-auto px-5 py-5 space-y-6">
-        
-        {/* Value Big Input */}
-        <div className="bg-indigo-50/30 rounded-2xl p-4 border border-indigo-100/50 space-y-3">
-          <div className="flex items-center justify-between">
-            <label className="block text-xs font-semibold text-indigo-800 uppercase tracking-wider">
-              How much was spent?
-            </label>
-            
-            {/* Record currency toggle button */}
-            {currencySymbol !== 'S$' && (
-              <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-[11px] font-bold">
-                <button
-                  type="button"
-                  onClick={() => handleToggleInputCurrency(false)}
-                  className={`px-2 py-0.5 rounded transition-all ${
-                    !inputInSgd
-                      ? 'bg-white text-slate-800 shadow-2xs'
-                      : 'text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  {baseCurrencyCode} Base ({currencySymbol})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleToggleInputCurrency(true)}
-                  className={`px-2 py-0.5 rounded flex items-center space-x-1 transition-all ${
-                    inputInSgd
-                      ? 'bg-white text-indigo-700 shadow-2xs'
-                      : 'text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  <span>SGD (S$)</span>
-                  <Sparkles className="w-2.5 h-2.5 text-amber-500 fill-amber-500" />
-                </button>
+
+        {/* Scan Receipt */}
+        {!expenseToEdit && (
+          <div className="space-y-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={handleFileSelected}
+            />
+            <button
+              type="button"
+              onClick={handleScanReceiptClick}
+              disabled={isScanning}
+              className="w-full h-11 border-2 border-dashed border-indigo-200 hover:border-indigo-400 hover:bg-indigo-50/40 disabled:opacity-70 rounded-xl flex items-center justify-center space-x-2 text-sm font-semibold text-indigo-700 transition-all"
+            >
+              {isScanning ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Reading receipt…</span>
+                </>
+              ) : (
+                <>
+                  <Camera className="w-4 h-4" />
+                  <span>Scan Receipt</span>
+                </>
+              )}
+            </button>
+            {scanError && (
+              <div className="flex items-start space-x-2 text-rose-600 bg-rose-50 border border-rose-100 p-2.5 rounded-xl">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <p className="text-[11px] leading-snug">{scanError}</p>
               </div>
             )}
           </div>
-          
+        )}
+
+        {/* Value Big Input */}
+        <div className="bg-indigo-50/30 rounded-2xl p-4 border border-indigo-100/50 space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <label className="block text-xs font-semibold text-indigo-800 uppercase tracking-wider">
+              How much was spent?
+            </label>
+
+            {/* Foreign currency selector */}
+            <div className="flex items-center space-x-1.5">
+              {isFetchingRate && <Loader2 className="w-3 h-3 text-indigo-400 animate-spin" />}
+              <select
+                value={foreignCurrencyCode || ''}
+                onChange={(e) => handleSetForeignCurrency(e.target.value || null)}
+                className="h-7 pl-2 pr-6 rounded-lg border border-slate-200 bg-white text-[11px] font-bold text-slate-600 focus:outline-none focus:border-indigo-400 cursor-pointer"
+              >
+                <option value="">{baseCurrencyCode} Base ({currencySymbol})</option>
+                {CURRENCIES.filter(c => c.code !== baseCurrencyCode).map(c => (
+                  <option key={c.code} value={c.code}>Paid in {c.code} ({c.symbol})</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
           <div className="relative flex items-center">
             <span className="font-display text-2xl font-bold text-indigo-600 mr-2">
-              {inputInSgd ? 'S$' : currencySymbol}
+              {activeSymbol}
             </span>
             <input
               type="number"
@@ -346,8 +428,8 @@ export default function ExpenseForm({
             />
           </div>
 
-          {/* S$ conversion details if active */}
-          {inputInSgd && currencySymbol !== 'S$' && (
+          {/* Foreign currency conversion details if active */}
+          {foreignCurrencyCode && (
             <div className="mt-2 pt-2.5 border-t border-indigo-100/50 flex flex-wrap items-center justify-between text-xs text-slate-500 gap-2 font-medium">
               <div>
                 Equivalent Trip Cost:{' '}
@@ -365,7 +447,7 @@ export default function ExpenseForm({
                   onChange={(e) => setCustomExchangeRate(e.target.value)}
                   className="w-16 text-center font-bold font-mono text-slate-800 focus:outline-none p-0 text-xs inline bg-transparent"
                 />
-                <span className="text-[10px] text-slate-450">SGD</span>
+                <span className="text-[10px] text-slate-450">{foreignCurrencyCode}</span>
               </div>
             </div>
           )}
@@ -524,8 +606,8 @@ export default function ExpenseForm({
                       className="flex items-center space-x-3 text-left focus:outline-none flex-1 py-1 select-none"
                     >
                       <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${
-                        isSelected 
-                          ? 'bg-indigo-600 border-indigo-600 text-white' 
+                        isSelected
+                          ? 'bg-indigo-600 border-indigo-600 text-white'
                           : 'border-slate-300 text-transparent bg-white'
                       }`}>
                         <Check className="w-3.5 h-3.5 stroke-[2.5]" />
@@ -534,8 +616,8 @@ export default function ExpenseForm({
                         <p className="text-sm font-semibold text-slate-700">{friend.name}</p>
                         {splitType === 'equal' && isSelected && parsedAmount > 0 && (
                           <p className="text-[10px] text-slate-500 font-mono">
-                            owes {inputInSgd ? 'S$' : currencySymbol}{(parsedAmount / splitAmong.length).toFixed(2)}
-                            {inputInSgd && (
+                            owes {activeSymbol}{(parsedAmount / splitAmong.length).toFixed(2)}
+                            {foreignCurrencyCode && (
                               <span className="text-slate-400 font-normal">
                                 {' '}
                                 ({currencySymbol}{((parsedAmount / activeRate) / splitAmong.length).toFixed(2)})
@@ -549,7 +631,7 @@ export default function ExpenseForm({
                     {/* Render unequal input */}
                     {splitType === 'unequal' && isSelected && (
                       <div className="flex items-center space-x-1.5 max-w-[120px]">
-                        <span className="text-xs text-slate-500 font-mono">{inputInSgd ? 'S$' : currencySymbol}</span>
+                        <span className="text-xs text-slate-500 font-mono">{activeSymbol}</span>
                         <input
                           type="number"
                           placeholder="0.00"
@@ -577,7 +659,7 @@ export default function ExpenseForm({
                         <span className="text-xs text-slate-500 font-mono">%</span>
                         {parsedAmount > 0 && (
                           <span className="text-[10px] text-slate-400 font-mono min-w-[45px] text-right">
-                            ({inputInSgd ? 'S$' : currencySymbol}{(((parseFloat(splitDetails[friend.id]) || 0) / 100) * parsedAmount).toFixed(1)})
+                            ({activeSymbol}{(((parseFloat(splitDetails[friend.id]) || 0) / 100) * parsedAmount).toFixed(1)})
                           </span>
                         )}
                       </div>

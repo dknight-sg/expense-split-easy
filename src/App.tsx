@@ -9,7 +9,7 @@ import {
   Check, Search, Sparkles, Receipt, Coins, TrendingUp, UserPlus, 
   ArrowRight, CornerDownRight, RotateCcw, CheckCircle, Landmark,
   Wallet, HelpCircle, X, ChevronRight, MessageSquare, ListFilter,
-  DollarSign, AlertTriangle, Cloud, CloudOff, RefreshCw, LogOut, Key
+  DollarSign, AlertTriangle, RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Group, Friend, Expense, SplitType } from './types';
@@ -23,18 +23,13 @@ import ExpenseForm, { getCategoryIcon } from './components/ExpenseForm';
 import SpendingChart from './components/SpendingChart';
 
 // Firebase integrations
-import { auth, db, googleProvider, OperationType, handleFirestoreError } from './firebase';
-import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
-import { 
-  doc, 
-  setDoc, 
-  getDoc, 
-  getDocs, 
-  collection, 
-  query, 
-  where, 
-  onSnapshot, 
-  deleteDoc 
+import { db } from './firebase';
+import {
+  doc,
+  setDoc,
+  getDoc,
+  onSnapshot,
+  deleteDoc
 } from 'firebase/firestore';
 
 
@@ -106,60 +101,20 @@ export default function App() {
   } | null>(null);
 
   // Firebase Real-time Synchronization States
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [showJoinCodeModal, setShowJoinCodeModal] = useState(false);
-  const [joinCodeInput, setJoinCodeInput] = useState('');
-  const [syncCodeToDisplay, setSyncCodeToDisplay] = useState<string | null>(null);
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [joinedGroupIds, setJoinedGroupIds] = useState<string[]>(() => {
     const saved = localStorage.getItem('splitwise_joined_group_ids');
     return saved ? JSON.parse(saved) : [];
   });
 
-  // Monitor Auth Changes
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
-      if (user) {
-        showToast(`Signed in as ${user.displayName || 'Traveler'}! Cloud sync active.`);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // Google Sign In trigger
-  const handleGoogleSignIn = async () => {
-    setIsSyncing(true);
-    try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (err) {
-      console.error("Sign-in failure:", err);
-      showToast("Unable to complete Google Sign-In. Try again.");
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  // Sign out trigger
-  const handleSignOut = async () => {
-    setIsSyncing(true);
-    try {
-      await signOut(auth);
-      showToast("Signed out successfully. Switched back to offline storage.");
-    } catch (err) {
-      console.error("Sign-out failure:", err);
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  // Join existing Group/Trip via a Short Sync Code
-  const handleJoinTripWithSyncCode = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanCode = joinCodeInput.trim().toUpperCase();
+  // Core join logic shared by the manual code-entry modal and the auto-join-via-link flow
+  const joinTripByCode = async (rawCode: string): Promise<boolean> => {
+    const cleanCode = rawCode.trim().toUpperCase();
     if (!cleanCode) {
       showToast("Please enter a valid 6-digit sync code.");
-      return;
+      return false;
     }
 
     setIsSyncing(true);
@@ -167,25 +122,23 @@ export default function App() {
       // Lookup the code securely via document ID read (fully allowed by rules without general listing)
       const codeRef = doc(db, 'syncCodes', cleanCode);
       const codeSnap = await getDoc(codeRef);
-      
+
       if (!codeSnap.exists()) {
-        showToast("Trip not found! Check your code and try again.");
-        setIsSyncing(false);
-        return;
+        showToast("Trip not found! Check your code/link and try again.");
+        return false;
       }
 
       const { groupId } = codeSnap.data() as { groupId: string };
       const groupRef = doc(db, 'groups', groupId);
       const groupSnap = await getDoc(groupRef);
-      
+
       if (!groupSnap.exists()) {
         showToast("Trip group is no longer available.");
-        setIsSyncing(false);
-        return;
+        return false;
       }
 
       const remoteGroup = groupSnap.data() as Group;
-      
+
       // Store custom record of joined group-ids locally so we can track and listen to it
       const savedJoined = localStorage.getItem('splitwise_joined_group_ids');
       const joinedList: string[] = savedJoined ? JSON.parse(savedJoined) : [];
@@ -203,20 +156,34 @@ export default function App() {
       });
 
       setActiveGroupId(remoteGroup.id);
-      setShowJoinCodeModal(false);
-      setJoinCodeInput('');
       showToast(`Successfully joined trip: "${remoteGroup.name}"!`);
+      return true;
     } catch (err) {
       console.error("Failed to lookup sync code:", err);
       showToast("Unable to search code. Please try again.");
+      return false;
     } finally {
       setIsSyncing(false);
     }
   };
 
-  // Generate a code for current active group to share
-  const handleGenerateActiveSyncCode = async () => {
-    if (!currentGroup) return;
+  // Auto-join a trip when the app is opened via a shared invite link (?join=CODE)
+  useEffect(() => {
+    const inviteCode = new URLSearchParams(window.location.search).get('join');
+    if (!inviteCode) return;
+
+    joinTripByCode(inviteCode).finally(() => {
+      // Strip the param so a refresh doesn't re-trigger the join lookup
+      const url = new URL(window.location.href);
+      url.searchParams.delete('join');
+      window.history.replaceState({}, '', url.toString());
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Generate a code for current active group to share (works for guests too, not just signed-in owners)
+  const handleGenerateActiveSyncCode = async (): Promise<string | null> => {
+    if (!currentGroup) return null;
     setIsSyncing(true);
     try {
       const code = generateSyncCode();
@@ -232,29 +199,86 @@ export default function App() {
       });
       setGroups(updatedGroups);
 
-      // Save directly to Firestore for safety
-      if (currentUser) {
-        const groupRef = doc(db, 'groups', currentGroup.id);
-        await setDoc(groupRef, {
-          ...currentGroup,
-          syncCode: code,
-          ownerId: currentGroup.ownerId || currentUser.uid,
-          updatedAt: new Date().toISOString()
-        });
+      // Save directly to Firestore immediately so the code/link is live right away
+      const groupRef = doc(db, 'groups', currentGroup.id);
+      await setDoc(groupRef, sanitizeForFirestore({
+        ...currentGroup,
+        syncCode: code,
+        ownerId: currentGroup.ownerId || 'guest',
+        updatedAt: new Date().toISOString()
+      }));
 
-        // Also write to syncCodes mapping
-        const codeRef = doc(db, 'syncCodes', code);
-        await setDoc(codeRef, {
-          groupId: currentGroup.id,
-          createdAt: new Date().toISOString()
-        });
-      }
-      showToast("Generated Sync Code!");
+      // Also write to syncCodes mapping
+      const codeRef = doc(db, 'syncCodes', code);
+      await setDoc(codeRef, {
+        groupId: currentGroup.id,
+        createdAt: new Date().toISOString()
+      });
+
+      return code;
     } catch (err) {
       console.error(err);
+      return null;
     } finally {
       setIsSyncing(false);
     }
+  };
+
+  // Build a shareable invite link for the given sync code
+  const buildInviteLink = (code: string): string =>
+    `${window.location.origin}${window.location.pathname}?join=${code}`;
+
+  // One-tap invite: ensures a sync code exists, then opens the Invite panel with
+  // direct WhatsApp/Telegram buttons plus a copyable link (and the native share
+  // sheet on devices that support it).
+  const handleShareInvite = async () => {
+    if (!currentGroup) return;
+    const code = currentGroup.syncCode || await handleGenerateActiveSyncCode();
+    if (!code) {
+      showToast("Couldn't create an invite link. Please try again.");
+      return;
+    }
+    setInviteLink(buildInviteLink(code));
+    setShowInviteModal(true);
+  };
+
+  // Native OS share sheet (shows WhatsApp/Telegram/Slack/etc. if installed) — mobile only
+  const handleNativeShare = async () => {
+    if (!currentGroup || !inviteLink) return;
+    try {
+      await navigator.share({
+        title: `Join ${currentGroup.name} on SplitEasy`,
+        text: `Join our trip "${currentGroup.name}" on SplitEasy to track shared expenses:`,
+        url: inviteLink,
+      });
+    } catch (err) {
+      if ((err as Error)?.name !== 'AbortError') {
+        console.error('Failed to share invite:', err);
+      }
+    }
+  };
+
+  const handleCopyInviteLink = async () => {
+    if (!inviteLink) return;
+    try {
+      await navigator.clipboard.writeText(inviteLink);
+      showToast('Invite link copied to clipboard! 📋');
+    } catch (err) {
+      console.error('Failed to copy invite link:', err);
+      showToast('Failed to copy link. Please try again.');
+    }
+  };
+
+  const handleShareToWhatsApp = () => {
+    if (!currentGroup || !inviteLink) return;
+    const text = `Join our trip "${currentGroup.name}" on SplitEasy to track shared expenses: ${inviteLink}`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleShareToTelegram = () => {
+    if (!currentGroup || !inviteLink) return;
+    const text = `Join our trip "${currentGroup.name}" on SplitEasy to track shared expenses`;
+    window.open(`https://t.me/share/url?url=${encodeURIComponent(inviteLink)}&text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
   };
 
 
@@ -279,7 +303,7 @@ export default function App() {
     // Add ownerId if missing so that standard owner/member fields can be verified layout-wise
     const withOwnership: Group = {
       ...updatedGroup,
-      ownerId: updatedGroup.ownerId || (currentUser ? currentUser.uid : 'guest'),
+      ownerId: updatedGroup.ownerId || 'guest',
       updatedAt: updatedGroup.updatedAt || new Date().toISOString()
     };
 
@@ -326,7 +350,7 @@ export default function App() {
       const groupRef = doc(db, 'groups', group.id);
       const groupToSave = {
         ...group,
-        ownerId: (group as any).ownerId || (currentUser ? currentUser.uid : 'guest'),
+        ownerId: (group as any).ownerId || 'guest',
         updatedAt: (group as any).updatedAt || new Date().toISOString()
       };
 
@@ -352,7 +376,7 @@ export default function App() {
         }
       }
     });
-  }, [groups, currentUser]);
+  }, [groups]);
 
   // Firestore subscriber loop: Real-time sync down from Firestore (handles guests and hard-deletes!)
   useEffect(() => {
@@ -474,65 +498,10 @@ export default function App() {
       unsubscribes.push(unsub);
     });
 
-    // If authenticated, list/fetch newly created web groups owned by the user
-    let unsubOwner: (() => void) | null = null;
-    if (currentUser) {
-      const q1 = query(collection(db, 'groups'), where('ownerId', '==', currentUser.uid));
-      unsubOwner = onSnapshot(q1, (snapshot) => {
-        const dbGroups: Group[] = [];
-        snapshot.forEach((snap) => {
-          dbGroups.push(snap.data() as Group);
-        });
-
-        setGroups(prevGroups => {
-          const prevMap = new Map(prevGroups.map(g => [g.id, g]));
-          let changed = false;
-          const merged = [...prevGroups];
-
-          dbGroups.forEach(dbG => {
-            const localG = prevMap.get(dbG.id);
-            const dbStr = JSON.stringify(dbG);
-
-            if (!localG) {
-              merged.push(dbG);
-              changed = true;
-              localStorage.setItem(`sync_cache_${dbG.id}`, dbStr);
-            } else {
-              const gVal = localG as Group;
-              const isDifferent = 
-                dbG.updatedAt !== gVal.updatedAt ||
-                dbG.expenses?.length !== gVal.expenses?.length ||
-                dbG.friends?.length !== gVal.friends?.length ||
-                dbG.name !== gVal.name ||
-                dbG.description !== gVal.description ||
-                JSON.stringify(dbG.expenses) !== JSON.stringify(gVal.expenses);
-
-              if (isDifferent) {
-                const idx = merged.findIndex(g => g.id === dbG.id);
-                if (idx !== -1) {
-                  merged[idx] = dbG;
-                  changed = true;
-                  localStorage.setItem(`sync_cache_${dbG.id}`, dbStr);
-                }
-              }
-            }
-          });
-
-          if (changed) {
-            localStorage.setItem('splitwise_groups', JSON.stringify(merged));
-          }
-          return changed ? merged : prevGroups;
-        });
-      }, (error) => {
-        handleFirestoreError(error, OperationType.LIST, 'groups');
-      });
-    }
-
     return () => {
       unsubscribes.forEach(unsub => unsub());
-      if (unsubOwner) unsubOwner();
     };
-  }, [groups.map(g => g.id).join(','), joinedGroupIds.join(','), currentUser]);
+  }, [groups.map(g => g.id).join(','), joinedGroupIds.join(',')]);
 
   // Sync active group selection
   useEffect(() => {
@@ -793,8 +762,8 @@ export default function App() {
       setJoinedGroupIds(joinedList);
     }
 
-    // Now, if Firebase is connected, do real hard deletion from the cloud!
-    if (currentUser && targetGroup) {
+    // Also hard-delete from the cloud
+    if (targetGroup) {
       try {
         const groupRef = doc(db, 'groups', groupId);
         // Delete from Firestore
@@ -807,7 +776,7 @@ export default function App() {
         }
         console.log("Firestore elements deleted permanently.");
       } catch (err) {
-        console.warn("Soft-deleted on this device. Unable to hard-delete from cloud (not group owner?):", err);
+        console.warn("Soft-deleted on this device. Unable to hard-delete from cloud:", err);
       }
     }
 
@@ -904,7 +873,7 @@ export default function App() {
 
   // Completely wipe local storage and cache context for clean reset on mobile/desktop
   const handleHardReset = () => {
-    if (window.confirm("Perform hard reset? This will wipe all locally stored trips and offline cached data on this device. Your synced cloud trips will remain active in the cloud, but you must enter their Sync Code or Google login again to load them.")) {
+    if (window.confirm("Perform hard reset? This will wipe all locally stored trips and offline cached data on this device. Your synced cloud trips will remain active in the cloud, but you must reopen their invite link to load them.")) {
       localStorage.clear();
       localStorage.setItem('splitwise_demo_dismissed', 'true');
       window.location.reload();
@@ -955,50 +924,6 @@ export default function App() {
         </div>
 
         <div className="flex items-center space-x-2 text-xs">
-          {/* Join trip button */}
-          <button
-            onClick={() => setShowJoinCodeModal(true)}
-            className="flex items-center space-x-1 px-3 h-9 border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-600 rounded-xl font-bold transition-all cursor-pointer"
-            title="Enter a 6-digit Sync Code to import an existing trip from another device"
-          >
-            <Key className="w-3.5 h-3.5 shrink-0 text-slate-500" />
-            <span className="hidden md:inline">Join with Code</span>
-          </button>
-
-          {/* User Sign-In Profile Widget / Cloud Sync */}
-          {currentUser ? (
-            <div className="flex items-center space-x-2 bg-slate-50 border border-slate-150 rounded-xl pl-2.5 pr-1 py-1 ">
-              <div className="flex flex-col items-end hidden sm:flex">
-                <span className="text-[10px] font-bold text-slate-700 leading-none">{currentUser.displayName || 'Traveler'}</span>
-                <span className="text-[8px] text-teal-600 font-bold mt-0.5 leading-none">Cloud Synced</span>
-              </div>
-              {currentUser.photoURL ? (
-                <img src={currentUser.photoURL} alt={currentUser.displayName || ''} className="w-6.5 h-6.5 rounded-lg border border-slate-100 object-cover shrink-0" referrerPolicy="no-referrer" />
-              ) : (
-                <div className="w-6.5 h-6.5 rounded-lg bg-indigo-100 text-indigo-700 font-bold text-xs flex items-center justify-center shrink-0">
-                  {(currentUser.displayName || 'T').charAt(0)}
-                </div>
-              )}
-              <button
-                onClick={handleSignOut}
-                className="p-1 text-slate-400 hover:text-rose-500 rounded-lg transition-colors cursor-pointer"
-                title="Sign Out of Cloud Sync"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={handleGoogleSignIn}
-              disabled={isSyncing}
-              className="flex items-center space-x-1.5 px-3 h-9 bg-slate-100 hover:bg-slate-200/80 text-slate-600 rounded-xl font-semibold border border-slate-200 transition-all cursor-pointer"
-              title="Connect Cloud to back up and sync across multiple devices"
-            >
-              <Cloud className="w-4 h-4 text-slate-500 shrink-0" />
-              <span className="hidden sm:inline">Cloud Sync</span>
-            </button>
-          )}
-
           {groups.length > 0 && (
             <button
               onClick={() => setShowAddGroupModal(true)}
@@ -1193,46 +1118,24 @@ export default function App() {
                         )}
                       </div>
                       
-                      {/* Cloud status indicators and Sync Code generator */}
+                      {/* One-tap Invite Link sharing */}
                       <div className="flex items-center space-x-1.5 shrink-0">
-                        {currentGroup.syncCode ? (
-                          <div className="flex items-center space-x-1 bg-teal-50 border border-teal-150/60 text-teal-700 px-2 py-0.5 rounded-lg text-[10px] font-bold">
-                            <Cloud className="w-3 h-3 text-teal-600 shrink-0 animate-pulse" />
-                            <span>Code: {currentGroup.syncCode}</span>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (currentGroup.syncCode) {
-                                  navigator.clipboard.writeText(currentGroup.syncCode);
-                                  showToast(`Sync Code "${currentGroup.syncCode}" copied to clipboard! 📋`);
-                                }
-                              }}
-                              className="text-teal-500 hover:text-teal-700 transition-colors ml-0.5 border-l border-teal-200 pl-1 cursor-pointer"
-                              title="Copy Sync Code"
-                            >
-                              <Copy className="w-2.5 h-2.5" />
-                            </button>
-                          </div>
-                        ) : currentUser ? (
-                          <button
-                            onClick={handleGenerateActiveSyncCode}
-                            disabled={isSyncing}
-                            className="bg-indigo-50 border border-indigo-150/50 hover:bg-indigo-100 text-indigo-700 font-bold text-[10px] px-2 py-0.5 rounded-lg flex items-center space-x-1 transition-all cursor-pointer"
-                            title="Generate a 6-digit backup code to sync across your iPhone or other devices"
-                          >
-                            <RefreshCw className={`w-2.5 h-2.5 ${isSyncing ? 'animate-spin' : ''}`} />
-                            <span>Sync</span>
-                          </button>
-                        ) : (
-                          <button
-                            onClick={handleGoogleSignIn}
-                            className="bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-500 font-bold text-[10px] px-2 py-0.5 rounded-lg flex items-center space-x-1 transition-all cursor-pointer"
-                            title="Sign in with Google to enable real-time device-to-device cloud sync"
-                          >
-                            <CloudOff className="w-2.5 h-2.5 text-slate-400 shrink-0" />
-                            <span>Sync</span>
-                          </button>
-                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleShareInvite();
+                          }}
+                          disabled={isSyncing}
+                          className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-bold text-[10px] px-2 py-0.5 rounded-lg flex items-center space-x-1 transition-all cursor-pointer"
+                          title="Share a one-tap invite link via WhatsApp, Telegram, Slack, etc."
+                        >
+                          {isSyncing ? (
+                            <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+                          ) : (
+                            <Share2 className="w-2.5 h-2.5" />
+                          )}
+                          <span>Invite</span>
+                        </button>
                       </div>
                     </div>
 
@@ -1505,9 +1408,9 @@ export default function App() {
                                         <h4 className={`text-xs font-bold truncate ${expense.isSettlement ? 'text-indigo-900' : 'text-slate-800'}`}>
                                           {expense.title}
                                         </h4>
-                                        {originalExpense.originalCurrency === 'SGD' && (
-                                          <span className="shrink-0 bg-amber-50 text-amber-700 border border-amber-200/50 text-[8px] font-extrabold px-1.5 py-0.5 rounded-full flex items-center gap-0.5" title="Recorded in SGD">
-                                            <span>SGD</span>
+                                        {originalExpense.originalCurrency && (
+                                          <span className="shrink-0 bg-amber-50 text-amber-700 border border-amber-200/50 text-[8px] font-extrabold px-1.5 py-0.5 rounded-full flex items-center gap-0.5" title={`Recorded in ${originalExpense.originalCurrency}`}>
+                                            <span>{originalExpense.originalCurrency}</span>
                                             <Sparkles className="w-2 h-2 text-amber-500 fill-amber-500" />
                                           </span>
                                         )}
@@ -1535,9 +1438,12 @@ export default function App() {
                                           {formatCurrency(expense.amount, viewInSgd ? 'S$' : currentGroup.currency)}
                                         </p>
                                         <p className="text-[9px] mt-0.5 leading-none">
-                                          {originalExpense.originalCurrency === 'SGD' && !viewInSgd ? (
-                                            <span className="text-amber-600 font-mono font-bold">Orig. S${originalExpense.sgdAmount?.toFixed(2)}</span>
-                                          ) : originalExpense.originalCurrency !== 'SGD' && viewInSgd ? (
+                                          {originalExpense.originalCurrency ? (
+                                            <span className="text-amber-600 font-mono font-bold">
+                                              Orig. {CURRENCIES.find(c => c.code === originalExpense.originalCurrency)?.symbol || originalExpense.originalCurrency}
+                                              {originalExpense.originalAmount?.toFixed(2)}
+                                            </span>
+                                          ) : viewInSgd ? (
                                             <span className="text-indigo-600 font-mono font-bold">Orig. {currentGroup.currency}{originalExpense.amount.toFixed(2)}</span>
                                           ) : (
                                             <span className="text-slate-400 font-medium">
@@ -2046,10 +1952,10 @@ export default function App() {
       </AnimatePresence>
 
       {/* =========================================================================
-         7. SYNC EXISTENT TRIP VIA CODE DIALOG MODAL
+         6b. INVITE FRIENDS VIA SHAREABLE LINK MODAL
          ========================================================================= */}
       <AnimatePresence>
-        {showJoinCodeModal && (
+        {showInviteModal && currentGroup && inviteLink && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -2065,66 +1971,72 @@ export default function App() {
               <div className="flex items-start justify-between">
                 <div className="space-y-1.5 flex-1">
                   <h3 className="text-sm font-bold text-slate-800 font-display flex items-center space-x-1.5">
-                    <Key className="w-4 h-4 text-indigo-600" />
-                    <span>Sync Existing Trip</span>
+                    <Share2 className="w-4 h-4 text-indigo-600" />
+                    <span>Invite to "{currentGroup.name}"</span>
                   </h3>
                   <p className="text-xs text-slate-500 leading-relaxed">
-                    Enter the 6-character Sync Code generated from your iPhone or other devices to instantly download and participate in the trip splits in real-time.
+                    Send this link to your friends — they just tap it to join the trip instantly, no code needed.
                   </p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowJoinCodeModal(false);
-                    setJoinCodeInput('');
-                  }}
+                  onClick={() => setShowInviteModal(false)}
                   className="p-1 text-slate-400 hover:text-slate-600 rounded-lg transition-colors ml-2"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
-              <form onSubmit={handleJoinTripWithSyncCode} className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-450 uppercase tracking-widest block pl-0.5">
-                    6-DIGIT SYNC CODE
-                  </label>
-                  <input
-                    type="text"
-                    value={joinCodeInput}
-                    onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}
-                    maxLength={6}
-                    placeholder="E.G. XY98ZF"
-                    className="w-full h-11 bg-slate-50 border border-slate-200 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 rounded-xl px-4 text-center text-sm font-bold placeholder:text-slate-350 tracking-wider font-mono outline-none transition-all uppercase"
-                    autoFocus
-                  />
-                </div>
+              {/* Copyable link field */}
+              <div className="flex items-center space-x-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={inviteLink}
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="flex-1 h-10 bg-slate-50 border border-slate-200 rounded-xl px-3 text-[11px] text-slate-600 font-mono outline-none truncate"
+                />
+                <button
+                  type="button"
+                  onClick={handleCopyInviteLink}
+                  className="h-10 px-3 bg-slate-100 hover:bg-slate-200/80 text-slate-600 rounded-xl transition-all flex items-center space-x-1 shrink-0"
+                  title="Copy invite link"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span className="text-[11px] font-bold">Copy</span>
+                </button>
+              </div>
 
-                <div className="flex items-center space-x-2 pt-2 border-t border-slate-100">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowJoinCodeModal(false);
-                      setJoinCodeInput('');
-                    }}
-                    className="flex-1 h-10 border border-slate-200 hover:border-slate-300 text-slate-500 hover:text-slate-700 hover:bg-slate-50 text-xs font-semibold rounded-xl text-center transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isSyncing}
-                    className="flex-1 h-10 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-450 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center space-x-1.5"
-                  >
-                    {isSyncing ? (
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Cloud className="w-3.5 h-3.5" />
-                    )}
-                    <span>Import and Sync</span>
-                  </button>
-                </div>
-              </form>
+              {/* Direct share shortcuts */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={handleShareToWhatsApp}
+                  className="h-10 bg-emerald-50 hover:bg-emerald-100 border border-emerald-150/60 text-emerald-700 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition-all"
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  <span>WhatsApp</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleShareToTelegram}
+                  className="h-10 bg-sky-50 hover:bg-sky-100 border border-sky-150/60 text-sky-700 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition-all"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span>Telegram</span>
+                </button>
+              </div>
+
+              {typeof navigator !== 'undefined' && !!navigator.share && (
+                <button
+                  type="button"
+                  onClick={handleNativeShare}
+                  className="w-full h-10 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition-all"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span>More share options (Slack, iMessage, etc.)</span>
+                </button>
+              )}
             </motion.div>
           </motion.div>
         )}
